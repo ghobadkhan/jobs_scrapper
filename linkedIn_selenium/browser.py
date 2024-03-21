@@ -23,8 +23,10 @@ skills_text_pattern = re.compile(r"(.*)\n.*")
 options = Options()
 options.add_argument(f"user-data-dir={os.environ['CHROME_PROFILE']}")
 options.add_argument("disable-infobars")
-# options.add_argument("--disable-extensions")
-# options.add_argument("--headless")
+ # Don't enable the extension for crawling from linkedin. We'll use the extension later
+ # for auto-fill (hopefully)
+options.add_argument("--disable-extensions")
+options.add_argument("--headless")
 # options.add_argument("profile-directory='Profile 4'")
 driver = webdriver.Chrome(options=options)
 driver.set_page_load_timeout(12)
@@ -43,7 +45,7 @@ def driver_get_link(link:str):
 	try:
 		driver.get(link)
 	except TimeoutException:
-		logger.warn("Page load timed out!")
+		logger.warning("Page load timed out!")
 		return True
 
 
@@ -84,7 +86,7 @@ def get_job_links(keywords:str,backup_path:str,max_n_jobs=500):
 		for div_element in divs:
 			a_tags = div_element.find_elements(by=By.XPATH,value=".//a")
 			for a_tag in a_tags:
-				href = a_tag.get_attribute("href").split("?")[0]
+				href = a_tag.get_attribute("href").split("?")[0] # type: ignore
 				backup_data({"href":href},backup_path)
 				hrefs.append(href)
 	return hrefs
@@ -147,9 +149,9 @@ def get_current_tab_url():
 	try:
 		return driver.current_url
 	except TimeoutException:
-		logger.warn("Error getting tab URL. Timed Out")
+		logger.warning("Error getting tab URL. Timed Out")
 	except:
-		logger.warn("Error getting tab URL. Unknown Error")
+		logger.warning("Error getting tab URL. Unknown Error")
 	return None
 
 def get_apply_link():
@@ -220,10 +222,12 @@ def crawl(keywords:str,max_n_jobs=500):
 		sys.exit()
 	# with open("backup_path","r") as f:
 	#     links =  f.read().splitlines()
-	Path("results").mkdir(exist_ok=True)
-	if os.path.exists("results/selenium_scrap_results.csv"):
+	out_folder = os.environ['OUTPUT_FOLDER']
+	out_file = os.environ['OUTPUT_FILE']
+	Path(out_folder).mkdir(exist_ok=True)
+	if os.path.exists(f"{out_folder}/{out_file}"):
 		mode = "a"
-		prev_data = pd.read_csv("results/selenium_scrap_results.csv")
+		prev_data = pd.read_csv(f"{out_folder}/{out_file}")
 		header = False
 	else:
 		mode = "w"
@@ -238,7 +242,7 @@ def crawl(keywords:str,max_n_jobs=500):
 	try:
 		if prev_data is not None:
 			df = df[prev_data.columns] # reorder columns according to csv file
-		df.to_csv("results/selenium_scrap_results.csv",mode=mode,index=False,header=header)
+		df.to_csv(f"{out_folder}/{out_file}",mode=mode,index=False,header=header)
 		# os.remove(backup_path)
 		logger.info("Data write completed")
 	except Exception as e:

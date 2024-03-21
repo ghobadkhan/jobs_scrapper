@@ -1,0 +1,8 @@
+lxml
+pandas
+PyAutoGUI
+python-dotenv
+PyYAML
+requests
+selenium
+webdriver-manager
