@@ -35,3 +35,10 @@ loggers:
       - console
       - file
     propagate: False
+  autofill:
+    qualname: autofill
+    level: DEBUG
+    handlers: 
+      - console
+      - file
+    propagate: False

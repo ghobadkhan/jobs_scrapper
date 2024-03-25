@@ -9,45 +9,109 @@ from logging import Logger, config, getLogger
 from typing import List
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver.chrome.options import Options
 from webdriver_manager.chrome import ChromeDriverManager
 from datetime import datetime, timedelta
 from time import sleep
+from functools import wraps
 # print(ChromeDriverManager().install())
 job_id_pattern = re.compile(r".*view\/(\d*).*")
 dotenv.load_dotenv(".env")
 extract_number_pattern = re.compile(r"\D*(\d*)\D*")
 post_time_pattern = re.compile(r".* (.*?)s? ago")
-skills_text_pattern = re.compile(r"(.*)\n.*")
-options = Options()
-options.add_argument(f"user-data-dir={os.environ['CHROME_PROFILE']}")
-options.add_argument("disable-infobars")
- # Don't enable the extension for crawling from linkedin. We'll use the extension later
- # for auto-fill (hopefully)
-options.add_argument("--disable-extensions")
-options.add_argument("--headless")
-# options.add_argument("profile-directory='Profile 4'")
-driver = webdriver.Chrome(options=options)
-driver.set_page_load_timeout(12)
-path = os.path.dirname(os.path.abspath(__file__))
+skills_text_pattern = re.compile(r"(.*)\n?.*")
+driver: webdriver.Chrome
+base_path = os.path.dirname(os.path.abspath(__file__))
 logger:Logger = getLogger()
+
+"""
+Wraps a retry attempt around any method
+To use this, the called method must raise an Exception object with two args:
+arg[0] must always be RETRY
+arg[1] can be the subject of retry
+"""
+def retry(retry_timeout:int, logger:Logger ,retry_multiplier:float = 0, max_retry_attempts:int=5):
+	attempt = 0
+	def decorator(func):
+		@wraps(func)
+		def wrapper(*args, **kwargs):
+			nonlocal attempt
+			try:
+				func(*args,**kwargs)
+			except Exception as e:
+				if len(e.args) > 0 and e.args[0] == "RETRY":
+					if len(e.args) == 1:
+						reason = "_"
+					else:
+						reason = e.args[1]
+					if attempt >= max_retry_attempts:
+						logger.error(f"Maximum retires is reached for {func.__name__} on {reason}. Exiting!")
+						sys.exit(1)
+					else:
+						logger.warning(f"{func.__name__} requested retry for {reason}.")
+						#TODO: The formula for retry time out is not correct!
+						t = (1+attempt*retry_multiplier)*retry_timeout
+						logger.info(f"Retry:{attempt}, Waiting for {t} seconds.")
+						sleep(t)
+						attempt += 1
+						wrapper(*args,**kwargs)
+				else:
+					logger.warning(f"attempt function is invoked for {func.__name__}"\
+					"but proper Exception is not raised. Raising the original Exception")
+					raise e
+		return wrapper
+	return decorator
+
+
+def setup_webdriver(disable_extension=True,headless=True, load_timeout=12,debug_address:str|None=None):
+	#TODO: Load options from a file or other external source
+	options = Options()
+	if debug_address is None:
+		options.add_argument(f"user-data-dir={os.environ['CHROME_PROFILE']}")
+		options.add_argument("disable-infobars")
+		# Don't enable the extension for crawling from linkedin. We'll use the extension later
+		# for auto-fill (hopefully)
+		if disable_extension:
+			options.add_argument("--disable-extensions")
+		if headless:
+			options.add_argument("--headless")
+	else:
+		# Example: google-chrome --remote-debugging-port=9222 --remote-allow-origins=*
+		options.add_experimental_option("debuggerAddress", debug_address)
+	driver = webdriver.Chrome(options=options)
+	if load_timeout > 12:
+		driver.set_page_load_timeout(load_timeout)
+	return driver
+
 
 def setup_logger(name:str=__name__):
 	Path("log").mkdir(exist_ok=True)
-	logging_config_file_name = f'{path}/logging_local.yml'
+	logging_config_file_name = f'{base_path}/logging_local.yml'
 	with open(logging_config_file_name, 'r') as logging_config_file:
 		config.dictConfig(yaml.load(logging_config_file, Loader=yaml.FullLoader))
 	return getLogger(name)
 
+@retry(
+	retry_timeout=int(os.environ["DISCONNECT_TIMEOUT"]),
+	logger=logger,
+	retry_multiplier=float(os.environ["DISCONNECT_MULTIPLIER"]),
+	max_retry_attempts=int(os.environ["DISCONNECT_MAX_RETRIES"])
+	)
 def driver_get_link(link:str):
+	global disconnect_timeout, disconnect_attempt
 	logger.debug(f"Get URL: {link}")
 	try:
 		driver.get(link)
 	except TimeoutException:
 		logger.warning("Page load timed out!")
 		return True
-
+	except WebDriverException as e:
+		if e.msg is not None and (e.msg.find("ERR_INTERNET_DISCONNECTED") != -1 or \
+		e.msg.find("ERR_PROXY_CONNECTION_FAILED") != -1):
+			raise Exception("RETRY","Connecting Internet")
+		else:
+			raise e
 
 def sign_in():
 	logger.info("Begin Sign-in")
@@ -92,7 +156,7 @@ def get_job_links(keywords:str,backup_path:str,max_n_jobs=500):
 	return hrefs
 
 def get_skills():
-	el = driver.find_elements(By.XPATH,"//span[text()[contains(.,'Show all skills')]]")
+	el = driver.find_elements(By.XPATH,"//span[text()[contains(.,'Show all skills') or contains(.,'Show qualification details')]]")
 	if len(el) != 1:
 		return []
 	el[0].click()
@@ -104,6 +168,11 @@ def get_skills():
 	res = []
 	for skill in skills:
 		res.append(skills_text_pattern.findall(skill.text)[0])
+	el = driver.find_elements(By.XPATH,"//span[text()[contains(.,'Done')]]")
+	if len(el) == 0:
+		logger.warning("Job qualification details is opened, but close button not found")
+	else:
+		el[0].click()
 	return res
 
 def scrape_job_page(link:str,job_id:int):
@@ -250,19 +319,23 @@ def crawl(keywords:str,max_n_jobs=500):
 		logger.error(e)
 
 
-def main():
-	global logger
+def run():
+	global logger, driver
+	driver = setup_webdriver()
 	logger = setup_logger("scrape")
 	logger.info("---------------- Start a new crawl process ----------------")
 	sign_in()
 	crawl("junior python data engineer")
 	crawl("backend python software engineer")
 
-def test(link:str):
-	# data,err = crawl_links([link],None)
-	driver_get_link(link)
+def test():
+	global logger, driver
+	driver = setup_webdriver(debug_address="127.0.0.1:9222")
+	logger = setup_logger("scrape")
+	res = get_skills()
+	print(res)
 	logger.info("OK")
 
 if __name__ == "__main__":
-	main()
+	run()
 
