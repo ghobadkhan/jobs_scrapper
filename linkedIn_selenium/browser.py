@@ -24,6 +24,7 @@ skills_text_pattern = re.compile(r"(.*)\n?.*")
 driver: webdriver.Chrome
 base_path = os.path.dirname(os.path.abspath(__file__))
 logger:Logger = getLogger()
+env: dict
 
 """
 Wraps a retry attempt around any method
@@ -91,6 +92,11 @@ def setup_logger(name:str=__name__):
 	with open(logging_config_file_name, 'r') as logging_config_file:
 		config.dictConfig(yaml.load(logging_config_file, Loader=yaml.FullLoader))
 	return getLogger(name)
+
+def load_env(file_name=".env"):
+	with open(file_name, 'r') as logging_config_file:
+		return yaml.load(logging_config_file, Loader=yaml.FullLoader)
+
 
 @retry(
 	retry_timeout=int(os.environ["DISCONNECT_TIMEOUT"]),
@@ -271,7 +277,7 @@ def crawl_links(links:List[str],backup_path:str,prev_data: pd.DataFrame|None=Non
 			except Exception as e:
 				if 'expired' in e.args:
 					continue
-				logger.error(f"Unexpected Error while scraping")
+				logger.error(f"Unexpected error while scraping. Details:\n{e}")
 	return data
 
 def convert_post_time(str_time:str):
@@ -337,5 +343,10 @@ def test():
 	logger.info("OK")
 
 if __name__ == "__main__":
+	"""
+	Use this command to inhibit system from going to sleep while running the process:
+	(Bash and need the venv)
+	systemd-inhibit --what=sleep:handle-lid-switch python linkedIn_selenium/browser.py
+	"""
 	run()
 
