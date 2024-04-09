@@ -15,16 +15,18 @@ from webdriver_manager.chrome import ChromeDriverManager
 from datetime import datetime, timedelta
 from time import sleep
 from functools import wraps
+from ast import literal_eval
 # print(ChromeDriverManager().install())
 job_id_pattern = re.compile(r".*view\/(\d*).*")
-dotenv.load_dotenv(".env")
 extract_number_pattern = re.compile(r"\D*(\d*)\D*")
 post_time_pattern = re.compile(r".* (.*?)s? ago")
 skills_text_pattern = re.compile(r"(.*)\n?.*")
 driver: webdriver.Chrome
 base_path = os.path.dirname(os.path.abspath(__file__))
 logger:Logger = getLogger()
-env: dict
+# Load environment values into a dict variable
+env: dict = dotenv.dotenv_values(".env")
+env["MY_SKILLS"] = literal_eval(env["MY_SKILLS"])
 
 """
 Wraps a retry attempt around any method
@@ -69,7 +71,7 @@ def setup_webdriver(disable_extension=True,headless=True, load_timeout=12,debug_
 	#TODO: Load options from a file or other external source
 	options = Options()
 	if debug_address is None:
-		options.add_argument(f"user-data-dir={os.environ['CHROME_PROFILE']}")
+		options.add_argument(f"user-data-dir={env['CHROME_PROFILE']}")
 		options.add_argument("disable-infobars")
 		# Don't enable the extension for crawling from linkedin. We'll use the extension later
 		# for auto-fill (hopefully)
@@ -99,10 +101,10 @@ def load_env(file_name=".env"):
 
 
 @retry(
-	retry_timeout=int(os.environ["DISCONNECT_TIMEOUT"]),
+	retry_timeout=int(env["DISCONNECT_TIMEOUT"]),
 	logger=logger,
-	retry_multiplier=float(os.environ["DISCONNECT_MULTIPLIER"]),
-	max_retry_attempts=int(os.environ["DISCONNECT_MAX_RETRIES"])
+	retry_multiplier=float(env["DISCONNECT_MULTIPLIER"]),
+	max_retry_attempts=int(env["DISCONNECT_MAX_RETRIES"])
 	)
 def driver_get_link(link:str):
 	global disconnect_timeout, disconnect_attempt
@@ -128,8 +130,8 @@ def sign_in():
 	if pattern.search(title):
 		# Enter your email address and password
 		try:
-			driver.find_element(by=By.ID,value='username').send_keys(os.environ["LINKEDIN_USER"])
-			driver.find_element(by=By.ID,value='password').send_keys(os.environ["LINKEDIN_PASSWORD"])# Submit the login form
+			driver.find_element(by=By.ID,value='username').send_keys(env["LINKEDIN_USER"])
+			driver.find_element(by=By.ID,value='password').send_keys(env["LINKEDIN_PASSWORD"])# Submit the login form
 			driver.find_element(by=By.CSS_SELECTOR,value='.login__form_action_container button').click()
 			logger.info("Sign-in complete")
 		except Exception as e:
@@ -297,8 +299,8 @@ def crawl(keywords:str,max_n_jobs=500):
 		sys.exit()
 	# with open("backup_path","r") as f:
 	#     links =  f.read().splitlines()
-	out_folder = os.environ['OUTPUT_FOLDER']
-	out_file = os.environ['OUTPUT_FILE']
+	out_folder = env['OUTPUT_FOLDER']
+	out_file = env['OUTPUT_FILE']
 	Path(out_folder).mkdir(exist_ok=True)
 	if os.path.exists(f"{out_folder}/{out_file}"):
 		mode = "a"
@@ -325,14 +327,14 @@ def crawl(keywords:str,max_n_jobs=500):
 		logger.error(e)
 
 
-def run():
+def run(keywords: List[str]):
 	global logger, driver
 	driver = setup_webdriver()
 	logger = setup_logger("scrape")
 	logger.info("---------------- Start a new crawl process ----------------")
 	sign_in()
-	crawl("junior python data engineer")
-	crawl("backend python software engineer")
+	for keyword in keywords:
+		crawl(keyword)
 
 def test():
 	global logger, driver
@@ -348,5 +350,5 @@ if __name__ == "__main__":
 	(Bash and need the venv)
 	systemd-inhibit --what=sleep:handle-lid-switch python linkedIn_selenium/browser.py
 	"""
-	run()
+	run(keywords=["junior python data engineer","backend python software engineer"])
 
