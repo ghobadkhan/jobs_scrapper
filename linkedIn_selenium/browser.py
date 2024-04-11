@@ -16,6 +16,8 @@ from datetime import datetime, timedelta
 from time import sleep
 from functools import wraps
 from ast import literal_eval
+from .contracts import JobData
+from .db import DB
 # print(ChromeDriverManager().install())
 job_id_pattern = re.compile(r".*view\/(\d*).*")
 extract_number_pattern = re.compile(r"\D*(\d*)\D*")
@@ -27,7 +29,7 @@ logger:Logger = getLogger()
 # Load environment values into a dict variable
 env: dict = dotenv.dotenv_values(".env")
 env["MY_SKILLS"] = literal_eval(env["MY_SKILLS"])
-
+job_data:JobData = DB(env["DB_NAME"])
 """
 Wraps a retry attempt around any method
 To use this, the called method must raise an Exception object with two args:
@@ -267,20 +269,13 @@ def backup_data(data:dict|list,backup_path:str):
 
 	
 
-def crawl_links(links:List[str],backup_path:str,prev_data: pd.DataFrame|None=None):
-	data = []
-	for link in links:
-		job_id = job_id_pattern.findall(link)[0]
-		if prev_data is None or not prev_data["job_id"].isin([int(job_id)]).any():
-			try:
-				job_data = scrape_job_page(link,job_id)
-				backup_data(job_data,backup_path)
-				data.append(job_data)
-			except Exception as e:
-				if 'expired' in e.args:
-					continue
-				logger.error(f"Unexpected error while scraping. Details:\n{e}")
-	return data
+def crawl_link(link:str,backup_path:str):
+	job_id = job_id_pattern.findall(link)[0]
+	if job_data.get_one(job_id) is None:
+		scraped_data = scrape_job_page(link,job_id)
+		backup_data(scraped_data,backup_path)
+		return scraped_data
+	return None
 
 def convert_post_time(str_time:str):
 	t = int(extract_number_pattern.findall(str_time)[0])
@@ -291,6 +286,7 @@ def convert_post_time(str_time:str):
 
 def crawl(keywords:str,max_n_jobs=500):
 	backup_path = get_backup_path("crawl_links","backup")
+	crawl_time = datetime.now()
 	try:
 		links = get_job_links(keywords,backup_path,max_n_jobs)
 	except Exception as e:
@@ -300,31 +296,14 @@ def crawl(keywords:str,max_n_jobs=500):
 	# with open("backup_path","r") as f:
 	#     links =  f.read().splitlines()
 	out_folder = env['OUTPUT_FOLDER']
-	out_file = env['OUTPUT_FILE']
 	Path(out_folder).mkdir(exist_ok=True)
-	if os.path.exists(f"{out_folder}/{out_file}"):
-		mode = "a"
-		prev_data = pd.read_csv(f"{out_folder}/{out_file}")
-		header = False
-	else:
-		mode = "w"
-		prev_data = None
-		header = True
 
 	backup_path = get_backup_path("crawl_data","backup")
-	data = crawl_links(links,backup_path,prev_data)
-	df = pd.DataFrame(data=data)
-	df["original_query"] = keywords
-	df["crawl_time"] = datetime.now()
-	try:
-		if prev_data is not None:
-			df = df[prev_data.columns] # reorder columns according to csv file
-		df.to_csv(f"{out_folder}/{out_file}",mode=mode,index=False,header=header)
-		# os.remove(backup_path)
-		logger.info("Data write completed")
-	except Exception as e:
-		logger.error(f"Data write failed. Backup file exists at: {backup_path}")
-		logger.error(e)
+	for link in links:
+		scraped_data = crawl_link(link,backup_path)
+		if scraped_data is None:
+			continue
+		job_data.write_one(**scraped_data,original_query=keywords,crawl_time=crawl_time)
 
 
 def run(keywords: List[str]):

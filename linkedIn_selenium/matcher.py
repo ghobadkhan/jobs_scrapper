@@ -1,6 +1,5 @@
 from thefuzz import fuzz, process
 from typing import Literal, List
-import dotenv
 
 def fuzz_match(ls1:List[str],ls2:List[str], method:Literal["Qratio","Wratio","normal","partial"] = "partial"):
     if len(ls1) == 0 or len(ls2) == 0:
