@@ -31,7 +31,7 @@ env: dict = dotenv.dotenv_values(".env")
 env["MY_SKILLS"] = literal_eval(env["MY_SKILLS"])
 job_data:JobData = DB(db_name=env["DB_NAME"],output_folder=env['OUTPUT_FOLDER'])
 
-def setup_webdriver(disable_extension=True,headless=True, load_timeout=12,debug_address:str|None=None):
+def setup_webdriver(disable_extension=True,headless=True, load_timeout=12, debug_address:str|None=None):
 	#TODO: Load options from a file or other external source
 	options = Options()
 	if debug_address is None:
@@ -154,7 +154,10 @@ def scrape_job_page(link:str,job_id:int):
 	sleep(3)
 	alert = driver.find_elements(By.XPATH,"//div[contains(@role,'alert')]")
 	if len(alert) > 0:
-		raise Exception("expired")
+		logger.warning("The job is expired")
+		img = driver.get_screenshot_as_base64()
+		img_file_name = f"{datetime.now().isoformat(timespec='seconds')}"
+		open(f"log/{img_file_name}.b64","w").write(img)
 	title = driver.find_element(By.XPATH,"//h1").accessible_name
 	details_el =  driver.find_element(By.XPATH,"//div[contains(@class,'job-details-jobs-unified-top-card__primary-description-container')]")
 	detail_items = details_el.text.split(" · ")
