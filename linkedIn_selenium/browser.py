@@ -11,14 +11,14 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver.chrome.options import Options
-from webdriver_manager.chrome import ChromeDriverManager
 from datetime import datetime, timedelta
 from time import sleep
-from functools import wraps
 from ast import literal_eval
 from .contracts import JobData
 from .db import DB
-# print(ChromeDriverManager().install())
+from .utils import retry
+from .matcher import produce_match_columns
+
 job_id_pattern = re.compile(r".*view\/(\d*).*")
 extract_number_pattern = re.compile(r"\D*(\d*)\D*")
 post_time_pattern = re.compile(r".* (.*?)s? ago")
@@ -29,45 +29,7 @@ logger:Logger = getLogger()
 # Load environment values into a dict variable
 env: dict = dotenv.dotenv_values(".env")
 env["MY_SKILLS"] = literal_eval(env["MY_SKILLS"])
-job_data:JobData = DB(env["DB_NAME"])
-"""
-Wraps a retry attempt around any method
-To use this, the called method must raise an Exception object with two args:
-arg[0] must always be RETRY
-arg[1] can be the subject of retry
-"""
-def retry(retry_timeout:int, logger:Logger ,retry_multiplier:float = 0, max_retry_attempts:int=5):
-	attempt = 0
-	def decorator(func):
-		@wraps(func)
-		def wrapper(*args, **kwargs):
-			nonlocal attempt
-			try:
-				func(*args,**kwargs)
-			except Exception as e:
-				if len(e.args) > 0 and e.args[0] == "RETRY":
-					if len(e.args) == 1:
-						reason = "_"
-					else:
-						reason = e.args[1]
-					if attempt >= max_retry_attempts:
-						logger.error(f"Maximum retires is reached for {func.__name__} on {reason}. Exiting!")
-						sys.exit(1)
-					else:
-						logger.warning(f"{func.__name__} requested retry for {reason}.")
-						#TODO: The formula for retry time out is not correct!
-						t = (1+attempt*retry_multiplier)*retry_timeout
-						logger.info(f"Retry:{attempt}, Waiting for {t} seconds.")
-						sleep(t)
-						attempt += 1
-						wrapper(*args,**kwargs)
-				else:
-					logger.warning(f"attempt function is invoked for {func.__name__}"\
-					"but proper Exception is not raised. Raising the original Exception")
-					raise e
-		return wrapper
-	return decorator
-
+job_data:JobData = DB(db_name=env["DB_NAME"],output_folder=env['OUTPUT_FOLDER'])
 
 def setup_webdriver(disable_extension=True,headless=True, load_timeout=12,debug_address:str|None=None):
 	#TODO: Load options from a file or other external source
@@ -85,7 +47,7 @@ def setup_webdriver(disable_extension=True,headless=True, load_timeout=12,debug_
 		# Example: google-chrome --remote-debugging-port=9222 --remote-allow-origins=*
 		options.add_experimental_option("debuggerAddress", debug_address)
 	driver = webdriver.Chrome(options=options)
-	if load_timeout > 12:
+	if load_timeout > 0:
 		driver.set_page_load_timeout(load_timeout)
 	return driver
 
@@ -166,6 +128,7 @@ def get_job_links(keywords:str,backup_path:str,max_n_jobs=500):
 	return hrefs
 
 def get_skills():
+	logger.debug("		+ Getting Required Skills")
 	el = driver.find_elements(By.XPATH,"//span[text()[contains(.,'Show all skills') or contains(.,'Show qualification details')]]")
 	if len(el) != 1:
 		return []
@@ -202,6 +165,7 @@ def scrape_job_page(link:str,job_id:int):
 	apply_link = get_apply_link()
 	skills = get_skills()
 	post_time,is_repost = convert_post_time(post_time_raw)
+	logger.debug("Scrapping Finished")
 	return {
 		"job_id": job_id,
 		"title": title, 
@@ -234,6 +198,7 @@ def get_current_tab_url():
 	return None
 
 def get_apply_link():
+	logger.debug("		+ Getting Apply Link")
 	res =  click_apply_button()
 	if not res:
 		return None
@@ -268,10 +233,9 @@ def backup_data(data:dict|list,backup_path:str):
 		df.to_csv(backup_path,mode="w",index=False)
 
 	
-
 def crawl_link(link:str,backup_path:str):
 	job_id = job_id_pattern.findall(link)[0]
-	if job_data.get_one(job_id) is None:
+	if not job_data.exists(job_id):
 		scraped_data = scrape_job_page(link,job_id)
 		backup_data(scraped_data,backup_path)
 		return scraped_data
@@ -284,7 +248,7 @@ def convert_post_time(str_time:str):
 	delta = timedelta(**kwarg)
 	return datetime.now() - delta, str_time.lower().find("reposted") != -1
 
-def crawl(keywords:str,max_n_jobs=500):
+def crawl(keywords:str,max_n_jobs=500,match_threshold=70):
 	backup_path = get_backup_path("crawl_links","backup")
 	crawl_time = datetime.now()
 	try:
@@ -295,32 +259,37 @@ def crawl(keywords:str,max_n_jobs=500):
 		sys.exit()
 	# with open("backup_path","r") as f:
 	#     links =  f.read().splitlines()
-	out_folder = env['OUTPUT_FOLDER']
-	Path(out_folder).mkdir(exist_ok=True)
 
 	backup_path = get_backup_path("crawl_data","backup")
 	for link in links:
 		scraped_data = crawl_link(link,backup_path)
+		if scraped_data and scraped_data["skills"] is not None:
+			match_columns = produce_match_columns(
+				scraped_data["skills"],
+				env["MY_SKILLS"],
+				threshold=match_threshold)
+		else:
+			match_columns = {}
 		if scraped_data is None:
 			continue
-		job_data.write_one(**scraped_data,original_query=keywords,crawl_time=crawl_time)
+		job_data.write_one(**scraped_data,**match_columns,original_query=keywords,crawl_time=crawl_time)
 
-
-def run(keywords: List[str]):
+def run(keywords: List[str],max_n_jobs=500):
 	global logger, driver
 	driver = setup_webdriver()
 	logger = setup_logger("scrape")
 	logger.info("---------------- Start a new crawl process ----------------")
 	sign_in()
 	for keyword in keywords:
-		crawl(keyword)
+		crawl(keyword,max_n_jobs)
 
 def test():
 	global logger, driver
-	driver = setup_webdriver(debug_address="127.0.0.1:9222")
+	driver = setup_webdriver(headless=False) #debug_address="127.0.0.1:9222"
 	logger = setup_logger("scrape")
-	res = get_skills()
-	print(res)
+	links = pd.read_csv("/media/arian/Storage/Projects/scrapper/backup/crawl_links_4.csv")["href"].values
+	for link in links:
+		crawl_link(link,"backup")
 	logger.info("OK")
 
 if __name__ == "__main__":
@@ -330,4 +299,3 @@ if __name__ == "__main__":
 	systemd-inhibit --what=sleep:handle-lid-switch python linkedIn_selenium/browser.py
 	"""
 	run(keywords=["junior python data engineer","backend python software engineer"])
-

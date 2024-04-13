@@ -1,4 +1,5 @@
 import sqlite3
+from pathlib import Path
 from typing import List
 from datetime import datetime
 from .contracts import JobData
@@ -6,9 +7,10 @@ from functools import lru_cache
 
 
 class DB(JobData):
-    def __init__(self, db_name:str) -> None:
-        
-        self.conn = sqlite3.connect(db_name)
+    def __init__(self, db_name:str,output_folder:str=".") -> None:
+        if output_folder != ".":
+            Path(output_folder).mkdir(exist_ok=True)
+        self.conn = sqlite3.connect(f"{output_folder}/{db_name}")
         self.cursor = self.conn.cursor()
         self.create_tables()
 
@@ -29,7 +31,7 @@ class DB(JobData):
         );
         CREATE TABLE IF NOT EXISTS details (
             id INTEGER PRIMARY KEY,
-            job_id INTEGER NOT NULL,
+            job_id INTEGER NOT NULL UNIQUE,
             title TEXT NOT NULL,
             company_id INTEGER NOT NULL REFERENCES company(id),
             post_time TEXT,
@@ -73,14 +75,14 @@ class DB(JobData):
 
         skills_str = None if (skills is None or len(skills)==0) else ",".join(skills)
         if top_matches is None:
-            top_matches_str = None
+            top_matches_str = "NULL"
         else:
-            top_matches_str = "'"+"','".join(top_matches)+"'"
+            top_matches_str = "json_array('"+"','".join(top_matches)+"')"
         insert_query = f"""
             INSERT INTO details (job_id, title, company_id, post_time, n_applicants,
             location, skills, is_repost, apply_link, post_time_raw, li_job_link,
             crawl_time_id, original_query_id, match_score, top_matches, match_threshold)
-            VALUES (?, ?, ?, datetime(?), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, json_array({top_matches_str}), ?)
+            VALUES (?, ?, ?, datetime(?), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, {top_matches_str}, ?)
         """
         data = (
             job_id, title, company_id, post_time, n_applicants,
@@ -166,11 +168,13 @@ class DB(JobData):
         """
         self.cursor.execute(q,(job_id,))
         res = self.cursor.fetchone()
-        if len(res) == 0:
+        if res is None:
             return None
         return dict(zip([column[0] for column in self.cursor.description], res))
 
     def update_one(self, job_id: int, data: dict):
+        if not self.exists(job_id):
+            return False
         data_stmt = ",".join([f"{k}='{v}'" for k,v in data.items()])
         q = f"""
         UPDATE details
@@ -179,3 +183,10 @@ class DB(JobData):
         """
         self.conn.execute(q)
         self.conn.commit()
+        return True
+    
+    def exists(self, job_id: int):
+        q = "SELECT * FROM details WHERE job_id = ?"
+        self.cursor.execute(q,(job_id,))
+        res = self.cursor.fetchone()
+        return res is not None

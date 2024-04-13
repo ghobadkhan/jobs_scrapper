@@ -12,6 +12,7 @@ def fuzz_match(ls1:List[str],ls2:List[str], method:Literal["Qratio","Wratio","no
         return fuzz.WRatio(ls1,ls2)
     elif method == "normal":
         return fuzz.token_sort_ratio(ls1,ls2)
+
 def find_matches(ls1, ls2, threshold=80):
     matches = []
     for keyword in ls1:
@@ -22,6 +23,13 @@ def find_matches(ls1, ls2, threshold=80):
     if len(matches) == 0:
         return None
     return matches
+
+def produce_match_columns(job_skills: List[str], my_skills: List[str], threshold: int=70):
+    return {
+        "match_score": fuzz_match(job_skills,my_skills,method='partial'),
+        "top_matches": find_matches(job_skills,my_skills,threshold),
+        "match_threshold": threshold
+    }
 
 if __name__ == "__main__":
     # my_skills = dotenv.get_key(".env","MY_SKILLS")
