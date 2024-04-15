@@ -41,7 +41,6 @@ class DB(JobData):
             is_repost INTEGER,
             apply_link TEXT,
             post_time_raw TEXT,
-            li_job_link TEXT,
             crawl_time_id INTEGER NOT NULL REFERENCES crawl_time(id),
             original_query_id INTEGER NOT NULL REFERENCES original_query(id),
             match_score INTEGER,
@@ -60,7 +59,6 @@ class DB(JobData):
             company_id:int,           
             crawl_time_id:int,
             original_query_id:int,
-            li_job_link:str,
             post_time:datetime|None=None,
             n_applicants:int|None=None,
             location:str|None=None,
@@ -80,13 +78,13 @@ class DB(JobData):
             top_matches_str = "json_array('"+"','".join(top_matches)+"')"
         insert_query = f"""
             INSERT INTO details (job_id, title, company_id, post_time, n_applicants,
-            location, skills, is_repost, apply_link, post_time_raw, li_job_link,
+            location, skills, is_repost, apply_link, post_time_raw,
             crawl_time_id, original_query_id, match_score, top_matches, match_threshold)
-            VALUES (?, ?, ?, datetime(?), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, {top_matches_str}, ?)
+            VALUES (?, ?, ?, datetime(?), ?, ?, ?, ?, ?, ?, ?, ?, ?, {top_matches_str}, ?)
         """
         data = (
             job_id, title, company_id, post_time, n_applicants,
-            location, skills_str, is_repost, apply_link, post_time_raw, li_job_link,
+            location, skills_str, is_repost, apply_link, post_time_raw,
             crawl_time_id, original_query_id, match_score, match_threshold
         )
         self.conn.execute(insert_query,data)
@@ -128,7 +126,23 @@ class DB(JobData):
             id = self.cursor.fetchone()
         return id[0]
     
-    def write_one(self, job_id: int, title: str, company_name: str, crawl_time: datetime, original_query: str, li_job_link: str, post_time: datetime | None = None, n_applicants: int | None = None, location: str | None = None, skills: List[str] | None = None, is_repost: bool = False, apply_link: str | None = None, post_time_raw: str | None = None, match_score: int | None = None, top_matches: List | None = None, match_threshold: int | None = None):
+    def write_one(self,
+        job_id: int,
+        title: str,
+        company_name: str,
+        crawl_time: datetime,
+        original_query: str,
+        post_time: datetime | None = None,
+        n_applicants: int | None = None,
+        location: str | None = None,
+        skills: List[str] | None = None,
+        is_repost: bool = False,
+        apply_link: str | None = None,
+        post_time_raw: str | None = None,
+        match_score: int | None = None,
+        top_matches: List | None = None,
+        match_threshold: int | None = None
+        ):
         company_id = self.get_company_id(company_name)
         original_query_id = self.get_original_query_id(original_query)
         crawl_time_id = self.get_crawl_time_id(crawl_time)
@@ -138,7 +152,6 @@ class DB(JobData):
             company_id,           
             crawl_time_id,
             original_query_id,
-            li_job_link,
             post_time,
             n_applicants,
             location,
@@ -158,7 +171,7 @@ class DB(JobData):
         q = f"""
         SELECT {'d.id,' if include_id else ''} d.job_id, d.title, c.name, d.post_time, 
         d.n_applicants, d.location, d.skills, d.is_repost, d.apply_link,
-        d.post_time_raw, d.li_job_link, t.time, c.name, d.match_score,
+        d.post_time_raw, t.time, c.name, d.match_score,
         d.top_matches, d.match_threshold, o.query
         FROM details AS d
         LEFT JOIN company AS c ON d.company_id = c.id
