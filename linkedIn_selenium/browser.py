@@ -97,7 +97,8 @@ def sign_in():
 			driver.find_element(by=By.ID,value='username').send_keys(env["LINKEDIN_USER"])
 			driver.find_element(by=By.ID,value='password').send_keys(env["LINKEDIN_PASSWORD"])# Submit the login form
 			driver.find_element(by=By.CSS_SELECTOR,value='.login__form_action_container button').click()
-			logger.info("Sign-in complete")
+			sleep(5)
+			take_screenshot()
 		except Exception as e:
 			logger.error(f"Error signing in. ---> {e}")
 
@@ -125,6 +126,7 @@ def get_job_links(keywords:str,backup_path:str,max_n_jobs=500):
 				href = a_tag.get_attribute("href").split("?")[0] # type: ignore
 				backup_data({"href":href},backup_path)
 				hrefs.append(href)
+		take_screenshot()
 	return hrefs
 
 def get_skills():
@@ -148,6 +150,12 @@ def get_skills():
 		el[0].click()
 	return res
 
+def take_screenshot(file_type:str="base64"):
+	if file_type == "base64":
+		img = driver.get_screenshot_as_base64()
+		img_file_name = f"{datetime.now().isoformat(timespec='seconds')}"
+		open(f"screenshots/{img_file_name}.b64","w").write(img)
+
 def scrape_job_page(link:str,job_id:int):
 	logger.debug(f"Scraping job page at {link}")
 	driver_get_link(link)
@@ -155,9 +163,7 @@ def scrape_job_page(link:str,job_id:int):
 	alert = driver.find_elements(By.XPATH,"//div[contains(@role,'alert')]")
 	if len(alert) > 0:
 		logger.warning("The job is expired")
-		img = driver.get_screenshot_as_base64()
-		img_file_name = f"{datetime.now().isoformat(timespec='seconds')}"
-		open(f"log/{img_file_name}.b64","w").write(img)
+		take_screenshot()
 	title = driver.find_element(By.XPATH,"//h1").accessible_name
 	details_el =  driver.find_element(By.XPATH,"//div[contains(@class,'job-details-jobs-unified-top-card__primary-description-container')]")
 	detail_items = details_el.text.split(" · ")
@@ -236,7 +242,7 @@ def backup_data(data:dict|list,backup_path:str):
 		df.to_csv(backup_path,mode="w",index=False)
 
 	
-def crawl_link(link:str,backup_path:str):
+def crawl_a_job_link(link:str,backup_path:str):
 	job_id = job_id_pattern.findall(link)[0]
 	if not job_data.exists(job_id):
 		scraped_data = scrape_job_page(link,job_id)
@@ -265,7 +271,7 @@ def crawl(keywords:str,max_n_jobs=500,match_threshold=70):
 
 	backup_path = get_backup_path("crawl_data","backup")
 	for link in links:
-		scraped_data = crawl_link(link,backup_path)
+		scraped_data = crawl_a_job_link(link,backup_path)
 		if scraped_data and scraped_data["skills"] is not None:
 			match_columns = produce_match_columns(
 				scraped_data["skills"],
@@ -292,7 +298,7 @@ def test():
 	logger = setup_logger("scrape")
 	links = pd.read_csv("/media/arian/Storage/Projects/scrapper/backup/crawl_links_4.csv")["href"].values
 	for link in links:
-		crawl_link(link,"backup")
+		crawl_a_job_link(link,"backup")
 	logger.info("OK")
 
 if __name__ == "__main__":
