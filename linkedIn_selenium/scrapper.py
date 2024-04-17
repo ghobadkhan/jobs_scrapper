@@ -1,5 +1,6 @@
 import re
 import sys
+from typing import Literal
 import pandas as pd
 import os
 from pathlib import Path
@@ -133,7 +134,6 @@ class Scrapper():
 					href = a_tag.get_attribute("href").split("?")[0] # type: ignore
 					self.backup_data({"href":href},backup_path)
 					hrefs.append(href)
-			self.take_screenshot()
 		return hrefs
 
 	def get_skills(self):
@@ -157,14 +157,20 @@ class Scrapper():
 			el[0].click()
 		return res
 
-	def take_screenshot(self,file_type:str="base64"):
-		if file_type == "base64":
-			img = self.driver.get_screenshot_as_base64()
-			img_file_name = f"{datetime.now().isoformat(timespec='seconds')}"
-			open(f"screenshots/{img_file_name}.b64","w").write(img)
-			self.logger.debug(f"Screenshot taken: {img_file_name}.b64")
-			return True
-		return False
+	def take_screenshot(self,file_type:Literal["b64","png"]="b64"):
+		img_file_name = f"{datetime.now().isoformat(timespec='seconds')}"
+		match file_type:
+			case "b64":
+				img = self.driver.get_screenshot_as_base64()
+				open(f"screenshots/{img_file_name}.b64","w").write(img)
+			case "png":
+				img = self.driver.get_screenshot_as_png()
+				open(f"screenshots/{img_file_name}.png","wb").write(img)
+			case _:
+				self.logger.error(f"Invalid file_type chosen for screenshot ({file_type}).")
+				return False
+		self.logger.debug(f"Screenshot taken: {img_file_name}.{file_type}")
+		return True
 
 	def scrape_job_page(self,link:str,job_id:int):
 		self.logger.debug(f"Scraping job page at {link}")
@@ -173,7 +179,6 @@ class Scrapper():
 		alert = self.driver.find_elements(By.XPATH,"//div[contains(@role,'alert')]")
 		if len(alert) > 0:
 			self.logger.warning("The job is expired")
-			self.take_screenshot()
 		title = self.driver.find_element(By.XPATH,"//h1").accessible_name
 		details_el =  self.driver.find_element(By.XPATH,"//div[contains(@class,'job-details-jobs-unified-top-card__primary-description-container')]")
 		detail_items = details_el.text.split(" · ")
@@ -254,7 +259,12 @@ class Scrapper():
 	def crawl_a_job_link(self,link:str,backup_path:str):
 		job_id = job_id_pattern.findall(link)[0]
 		if self.job_data and not self.job_data.exists(job_id):
-			scraped_data = self.scrape_job_page(link,job_id)
+			try:
+				scraped_data = self.scrape_job_page(link,job_id)
+			except Exception as e:
+				self.logger.error(f"Error! {e}")
+				self.take_screenshot("png")
+				return None
 			self.backup_data(scraped_data,backup_path)
 			return scraped_data
 		return None
