@@ -9,6 +9,7 @@ from selenium.webdriver.common.by import By
 from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver.chrome.options import Options
 from datetime import datetime, timedelta
+from ast import literal_eval
 from time import sleep
 from .contracts import JobData
 from .utils import retry
@@ -41,6 +42,12 @@ class Scrapper():
 		self.driver_get_link = self.setup_get_link()
 		self.job_data = job_data
 		self.max_n_jobs = max_n_jobs
+
+		# Get MY_SKILLS from env if available and parse it to a list
+		if "MY_SKILLS" in os.environ:
+			self.my_skills = literal_eval(os.environ["MY_SKILLS"])
+		else:
+			self.my_skills = None
 
 	def setup_webdriver(self,disable_extension=True,headless=True, load_timeout=12, debug_address:str|None=None):
 		#TODO: Load options from a file or other external source
@@ -188,8 +195,7 @@ class Scrapper():
 			"skills": skills,
 			"is_repost": is_repost,
 			"apply_link": apply_link,
-			"post_time_raw": post_time_raw,
-			"li_job_link": link
+			"post_time_raw": post_time_raw
 		}
 
 	def click_apply_button(self):
@@ -276,10 +282,10 @@ class Scrapper():
 		backup_path = self.get_backup_path("crawl_data","backup")
 		for link in links:
 			scraped_data = self.crawl_a_job_link(link,backup_path)
-			if scraped_data and scraped_data["skills"] is not None:
+			if scraped_data and scraped_data["skills"] is not None and self.my_skills:
 				match_columns = produce_match_columns(
 					scraped_data["skills"],
-					os.environ["MY_SKILLS"], # type:ignore
+					self.my_skills, # type:ignore
 					threshold=match_threshold)
 			else:
 				match_columns = {}
