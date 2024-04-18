@@ -259,7 +259,12 @@ class Scrapper():
 	def crawl_a_job_link(self,link:str,backup_path:str):
 		job_id = job_id_pattern.findall(link)[0]
 		if self.job_data and not self.job_data.exists(job_id):
-			scraped_data = self.scrape_job_page(link,job_id)
+			try:
+				scraped_data = self.scrape_job_page(link,job_id)
+			except Exception as e:
+				self.logger.error(f"Error! {e}")
+				self.take_screenshot("png")
+				return None
 			self.backup_data(scraped_data,backup_path)
 			return scraped_data
 		return None
