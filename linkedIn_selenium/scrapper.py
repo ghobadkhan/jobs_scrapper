@@ -31,8 +31,10 @@ class Scrapper():
 			headless=True,
 			load_timeout=12,
 			debug_address:str|None=None,
-			max_n_jobs:int = 500
+			max_n_jobs:int = 500,
+			driver_logging:bool = True
 			) -> None:
+		self.driver_logging = driver_logging
 		self.driver = self.setup_webdriver(
 			disable_extension=disable_extension,
 			headless=headless,
@@ -65,7 +67,11 @@ class Scrapper():
 		else:
 			# Example: google-chrome --remote-debugging-port=9222 --remote-allow-origins=*
 			options.add_experimental_option("debuggerAddress", debug_address)
-		driver = webdriver.Chrome(options=options)
+		if self.driver_logging:
+			service = webdriver.ChromeService(log_output="log/chrome.log")
+		else:
+			service = None
+		driver = webdriver.Chrome(options=options,service=service) #type: ignore
 		if load_timeout > 0:
 			driver.set_page_load_timeout(load_timeout)
 		return driver
