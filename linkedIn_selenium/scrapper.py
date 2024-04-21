@@ -1,8 +1,10 @@
+import glob
+import json
 import re
 import sys
-from typing import Literal
 import pandas as pd
 import os
+from typing import List, Literal
 from pathlib import Path
 from logging import Logger, getLogger
 from selenium import webdriver
@@ -13,8 +15,8 @@ from datetime import datetime, timedelta
 from ast import literal_eval
 from time import sleep
 from .contracts import JobData
-from .utils import retry
-from .matcher import produce_match_columns
+from .utils import retry, ScrapperException
+from .matcher import fuzz_match, find_matches
 
 job_id_pattern = re.compile(r".*view\/(\d*).*")
 extract_number_pattern = re.compile(r"\D*(\d*)\D*")
@@ -41,10 +43,26 @@ class Scrapper():
 			load_timeout=load_timeout,
 			debug_address=debug_address
 		)
+		Path(os.environ["BACKUP_FOLDER"]).mkdir(exist_ok=True)
 		self.logger = logger if logger else getLogger()
 		self.driver_get_link = self.setup_get_link()
 		self.job_data = job_data
 		self.max_n_jobs = max_n_jobs
+		self.crawl_time = None
+		"""
+		self.state
+		This value is exclusively used to save the current state (progress).
+		Schema:
+		{
+			"query": The present query,
+			"stage": either crawling_links_list or scrapping_each_link,
+			"data": if stage = crawling_links_list -> data is the last page
+				if stage = scrapping_each_link -> data is the last job_id
+			"attempt": number of times the state is accessed. Used for limit the 
+				persistence
+		}
+		"""
+		self.state: dict|None = self.read_state()
 
 		# Get MY_SKILLS from env if available and parse it to a list
 		if "MY_SKILLS" in os.environ:
@@ -68,7 +86,7 @@ class Scrapper():
 			# Example: google-chrome --remote-debugging-port=9222 --remote-allow-origins=*
 			options.add_experimental_option("debuggerAddress", debug_address)
 		if self.driver_logging:
-			service = webdriver.ChromeService(log_output="log/chrome.log")
+			service = webdriver.ChromeService(log_output=f"{os.environ['LOG_FOLDER']}/chrome.log")
 		else:
 			service = None
 		driver = webdriver.Chrome(options=options,service=service) #type: ignore
@@ -119,11 +137,16 @@ class Scrapper():
 		else:
 			self.logger.info("Already signed in!")
 
-	def get_job_links(self,keywords:str,backup_path:str):
-		self.logger.debug(f"Crawling job links for keyword: '{keywords}' - Max number of job links: {self.max_n_jobs}")
-		hrefs = []
-		keywords = keywords.replace(" ","%20")
-		for p in range(0,self.max_n_jobs,25):
+	def get_job_links_list(self,query:str,backup_path:str,start_page:int|None=0):
+		# set the 'start_page' to None to skip this stage
+		if start_page is None:
+			return
+		self.logger.debug(f"Crawling job links for query: '{query}' - Max number of job links: {self.max_n_jobs}")
+		keywords = query.replace(" ","%20") # breaking down the query into keywords
+		assert self.state is not None
+		self.state['stage'] = "crawling_links_list"
+		for p in range(start_page,self.max_n_jobs,25):
+			self.state["data"] = p
 			url = f'https://www.linkedin.com/jobs/search/?distance=250&geoId=101174742&keywords={keywords}&f_TPR=r604800&sortBy=DD'
 			url += f"&start={p}"
 			self.driver_get_link(url)
@@ -138,9 +161,7 @@ class Scrapper():
 				a_tags = div_element.find_elements(by=By.XPATH,value=".//a")
 				for a_tag in a_tags:
 					href = a_tag.get_attribute("href").split("?")[0] # type: ignore
-					self.backup_data({"href":href},backup_path)
-					hrefs.append(href)
-		return hrefs
+					self.backup_data({"href":href,"page":p},backup_path)
 
 	def get_skills(self):
 		self.logger.debug("		+ Getting Required Skills")
@@ -165,13 +186,14 @@ class Scrapper():
 
 	def take_screenshot(self,file_type:Literal["b64","png"]="b64"):
 		img_file_name = f"{datetime.now().isoformat(timespec='seconds')}"
+		folder = os.environ["SCREENSHOT_FOLDER"]
 		match file_type:
 			case "b64":
 				img = self.driver.get_screenshot_as_base64()
-				open(f"screenshots/{img_file_name}.b64","w").write(img)
+				open(f"{folder}/{img_file_name}.b64","w").write(img)
 			case "png":
 				img = self.driver.get_screenshot_as_png()
-				open(f"screenshots/{img_file_name}.png","wb").write(img)
+				open(f"{folder}/{img_file_name}.png","wb").write(img)
 			case _:
 				self.logger.error(f"Invalid file_type chosen for screenshot ({file_type}).")
 				return False
@@ -241,16 +263,9 @@ class Scrapper():
 				self.driver.switch_to.window(original_tab)
 		return external_url
 
-	def get_backup_path(self,file_name_stub:str,folder:str="backup"):
-		Path(folder).mkdir(exist_ok=True)
-		file_list = os.listdir(folder)
-		file_list = sorted([f for f in file_list if f.find(file_name_stub) !=-1],reverse=True)
-		if len(file_list) == 0:
-			file_name = file_name_stub + "_1.csv"
-		else:
-			last_file_name = file_list[0]
-			d = int(extract_number_pattern.findall(last_file_name)[0])
-			file_name = file_name_stub + f"_{d+1}.csv"
+	def get_backup_path(self,file_name_stub:str):
+		folder = os.environ["BACKUP_FOLDER"]
+		file_name = file_name_stub + ".csv"
 				
 		return f"{folder}/{file_name}"
 
@@ -261,9 +276,9 @@ class Scrapper():
 		else:
 			df.to_csv(backup_path,mode="w",index=False)
 
-	
-	def crawl_a_job_link(self,link:str,backup_path:str):
+	def scrap_a_job_link(self,link:str,backup_path:str|None = None):
 		job_id = job_id_pattern.findall(link)[0]
+		self.state["data"] = job_id # type: ignore
 		if self.job_data and not self.job_data.exists(job_id):
 			try:
 				scraped_data = self.scrape_job_page(link,job_id)
@@ -271,7 +286,8 @@ class Scrapper():
 				self.logger.error(f"Error! {e}")
 				self.take_screenshot("png")
 				return None
-			self.backup_data(scraped_data,backup_path)
+			if backup_path is not None:
+				self.backup_data(scraped_data,backup_path)
 			return scraped_data
 		return None
 
@@ -282,30 +298,99 @@ class Scrapper():
 		kwarg = {p:t}
 		delta = timedelta(**kwarg)
 		return datetime.now() - delta, str_time.lower().find("reposted") != -1
+	
+	def read_state(self) -> dict|None:
+		file_path = f"{os.environ['BACKUP_FOLDER']}/{os.environ['SCRAP_STATE_FILE']}"
+		
+		if not os.path.exists(file_path):
+			self.logger.debug(f"No state file existed at {file_path}")
+			return None
+		
+		# TODO: Unify link backup data with the other data as sqlite
+		with open(file_path,"r") as f:
+			self.logger.debug(f"State file exists at {file_path}")
+			return json.load(f)
+		
+	def write_state(self):
+		file_path = f"{os.environ['BACKUP_FOLDER']}/{os.environ['SCRAP_STATE_FILE']}"
+		with open(file_path,"w") as f:
+			json.dump(self.state,f)
+			self.logger.debug(f"State file is written at {file_path}")
+	
+	def del_state_and_backup(self):
+		self.logger.debug(f"Deleting the state and backup files")
+		folder = os.environ['BACKUP_FOLDER']
+		if not os.path.exists(folder):
+			self.logger.error("The backup folder does not exist!")
+		# Get a list of all files in the folder
+		files = glob.glob(folder + "/*")
+		# Iterate over the list of files and remove each one
+		for file in files:
+			if os.path.isfile(file):
+				self.logger.debug(f"Removing {file}")
+				os.remove(file)
+		self.state = None
 
-	def crawl(self,keywords:str,match_threshold=70):
-		backup_path = self.get_backup_path("crawl_links","backup")
-		crawl_time = datetime.now()
-		try:
-			links = self.get_job_links(keywords,backup_path)
-		except Exception as e:
-			self.logger.error(f"Unexpected error while getting job links. Backup available at {backup_path}")
-			self.logger.error(e)
-			sys.exit()
-		# with open("backup_path","r") as f:
-		#     links =  f.read().splitlines()
+	def generate_match_columns(self,scraped_data,threshold: int=70):
+		if scraped_data and scraped_data["skills"] is not None and self.my_skills:
+			job_skills = scraped_data["skills"]
+			return {
+				"match_score": fuzz_match(job_skills,self.my_skills,method='partial'),
+				"top_matches": find_matches(job_skills,self.my_skills,threshold),
+				"match_threshold": threshold
+			}
+		else:
+			return {}
 
-		backup_path = self.get_backup_path("crawl_data","backup")
-		for link in links:
-			scraped_data = self.crawl_a_job_link(link,backup_path)
-			if scraped_data and scraped_data["skills"] is not None and self.my_skills:
-				match_columns = produce_match_columns(
-					scraped_data["skills"],
-					self.my_skills, # type:ignore
-					threshold=match_threshold)
+	def run_sequence(self,query:str,match_threshold=70):
+		links_backup_path = self.get_backup_path("crawl_links")
+		self.crawl_time = datetime.now()
+
+		start_page = 0
+		if self.state is not None:
+			# TODO: The logic is flawed. The query check must be done at parent routine
+			self.state["attempt"] += 1
+			if self.state["query"] != query:
+				self.logger.debug(f"The present query: '{query}' is already crawled. Skipping it")
+				return
+			if self.state["stage"] == "crawling_links_list":
+				start_page = self.state["data"]
+			elif self.state["stage"] == "scrapping_each_link":
+				start_page = None
 			else:
-				match_columns = {}
+				raise Exception(f"Invalid value for 'stage' at state: {self.state['stage']}.")
+		else:
+			self.state = {"query": query, "attempt":0}
+
+		
+		self.get_job_links_list(query,links_backup_path,start_page)
+
+		links = pd.read_csv(links_backup_path)["href"].to_list()
+		assert self.state is not None
+		self.state['stage'] = "scrapping_each_link"
+		for link in links:
+			scraped_data = self.scrap_a_job_link(link)
 			if scraped_data is None:
 				continue
+			match_columns = self.generate_match_columns(scraped_data,match_threshold)
 			if self.job_data:
-				self.job_data.write_one(**scraped_data,**match_columns,original_query=keywords,crawl_time=crawl_time)
+				self.job_data.write_one(**scraped_data,**match_columns,original_query=query,crawl_time=self.crawl_time)
+		self.del_state_and_backup()
+
+	def manage_and_run(self,query:str,match_threshold=70):
+		try:
+			self.run_sequence(query=query,match_threshold=match_threshold)
+		except WebDriverException as e:
+			self.logger.error(f"A webdriver exception occurred:\n{e}")
+			if self.state is not None and self.state["attempt"] > int(os.environ["MAX_SCRAPPER_PERSISTENCE"]):
+				raise ScrapperException(kind="max_attempts")
+			else:
+				raise ScrapperException(kind="webdriver",e=e)
+		except Exception as e:
+			self.logger.error(f"An unknown exception occurred:\n{e}")
+			raise ScrapperException(kind="unknown",e=e)
+		finally:
+			if self.state is not None:
+				self.write_state()
+
+		
