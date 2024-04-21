@@ -23,17 +23,3 @@ def find_matches(ls1, ls2, threshold=80):
     if len(matches) == 0:
         return None
     return matches
-
-def produce_match_columns(job_skills: List[str], my_skills: List[str], threshold: int=70):
-    return {
-        "match_score": fuzz_match(job_skills,my_skills,method='partial'),
-        "top_matches": find_matches(job_skills,my_skills,threshold),
-        "match_threshold": threshold
-    }
-
-if __name__ == "__main__":
-    # my_skills = dotenv.get_key(".env","MY_SKILLS")
-    my_skills = ["python","javascript","angular","back-end","flask","front-end","aws","gcp"]
-    their_skills = ["python language","ecmascript","front-end"]
-    res = find_matches(my_skills,their_skills,70)
-    print(res)

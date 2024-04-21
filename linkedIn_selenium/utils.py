@@ -2,6 +2,7 @@ import sys
 from functools import wraps
 from logging import Logger
 from time import sleep
+from typing import Literal
 from webdriver_manager.chrome import ChromeDriverManager
 
 def retry(retry_timeout:int, logger:Logger ,retry_multiplier:float = 0, max_retry_attempts:int=5):
@@ -46,3 +47,15 @@ def download_chromedriver():
 	"""Downloads Chrome Webdriver of Selenium
 	"""
 	print(ChromeDriverManager().install())
+
+
+class ScrapperException(Exception):
+	def __init__(self, 
+			kind:Literal["webdriver","unknown","max_attempts"],
+			msg:str|None=None,
+			e:Exception|None=None
+		) -> None:
+		self.kind = kind
+		self.msg = msg
+		self.e = e 
+		super().__init__([msg,kind])
