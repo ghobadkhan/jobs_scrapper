@@ -61,7 +61,7 @@ for keyword in KEYWORDS:
                         logger=logger,
                         headless=HEADLESS
                     )
-                    # scrapper.sign_in()
+                    scrapper.sign_in()
                 case _:
                     logger.critical(f"Unknown error occurred from scrapper. Exiting!")
                     sys.exit(1)
