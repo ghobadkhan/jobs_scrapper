@@ -37,12 +37,13 @@ class Scrapper():
 			driver_logging:bool = True
 			) -> None:
 		self.driver_logging = driver_logging
-		self.driver = self.setup_webdriver(
-			disable_extension=disable_extension,
-			headless=headless,
-			load_timeout=load_timeout,
-			debug_address=debug_address
-		)
+		self.driver_options = {
+			"disable_extension": disable_extension,
+			"headless": headless,
+			"load_timeout": load_timeout,
+			"debug_address": debug_address
+		}
+		self.driver = self.setup_webdriver(**self.driver_options)
 		Path(os.environ["BACKUP_FOLDER"]).mkdir(exist_ok=True)
 		self.logger = logger if logger else getLogger()
 		self.driver_get_link = self.setup_get_link()
@@ -69,6 +70,11 @@ class Scrapper():
 			self.my_skills = literal_eval(os.environ["MY_SKILLS"])
 		else:
 			self.my_skills = None
+
+	def re_init_driver(self):
+		self.logger.debug("Re-Initializing the webdriver.")
+		self.driver.quit()
+		self.driver = self.setup_webdriver(**self.driver_options)
 
 	def setup_webdriver(self,disable_extension=True,headless=True, load_timeout=12, debug_address:str|None=None):
 		#TODO: Load options from a file or other external source
@@ -144,9 +150,9 @@ class Scrapper():
 		self.logger.debug(f"Crawling job links for query: '{query}' - Max number of job links: {self.max_n_jobs}")
 		keywords = query.replace(" ","%20") # breaking down the query into keywords
 		assert self.state is not None
-		self.state['stage'] = "crawling_links_list"
+		self.set_state({"stage":"crawling_links_list"})
 		for p in range(start_page,self.max_n_jobs,25):
-			self.state["data"] = p
+			self.set_state({"data":p})
 			url = f'https://www.linkedin.com/jobs/search/?distance=250&geoId=101174742&keywords={keywords}&f_TPR=r604800&sortBy=DD'
 			url += f"&start={p}"
 			self.driver_get_link(url)
@@ -278,7 +284,7 @@ class Scrapper():
 
 	def scrap_a_job_link(self,link:str,backup_path:str|None = None):
 		job_id = job_id_pattern.findall(link)[0]
-		self.state["data"] = job_id # type: ignore
+		self.set_state({"data":job_id})
 		if self.job_data and not self.job_data.exists(job_id):
 			try:
 				scraped_data = self.scrape_job_page(link,job_id)
@@ -311,7 +317,17 @@ class Scrapper():
 			self.logger.debug(f"State file exists at {file_path}")
 			return json.load(f)
 		
-	def write_state(self):
+
+	def set_state(self,state:dict|None=None):
+		accepted_keys = ["stage","data","attempt","query"]
+		if self.state is None:
+			self.state = {}
+		if state is not None:
+			for key,val in state.items():
+				if key not in accepted_keys:
+					raise Exception("Illegal state key is set.")
+			self.state[key] = val
+
 		file_path = f"{os.environ['BACKUP_FOLDER']}/{os.environ['SCRAP_STATE_FILE']}"
 		with open(file_path,"w") as f:
 			json.dump(self.state,f)
@@ -349,7 +365,8 @@ class Scrapper():
 		start_page = 0
 		if self.state is not None:
 			# TODO: The logic is flawed. The query check must be done at parent routine
-			self.state["attempt"] += 1
+
+			self.set_state({"attempt":self.state["attempt"]+1})
 			if self.state["query"] != query:
 				self.logger.debug(f"The present query: '{query}' is already crawled. Skipping it")
 				return
@@ -367,7 +384,7 @@ class Scrapper():
 
 		links = pd.read_csv(links_backup_path)["href"].to_list()
 		assert self.state is not None
-		self.state['stage'] = "scrapping_each_link"
+		self.set_state({"stage":"scrapping_each_link"})
 		for link in links:
 			scraped_data = self.scrap_a_job_link(link)
 			if scraped_data is None:
@@ -391,6 +408,6 @@ class Scrapper():
 			raise ScrapperException(kind="unknown",e=e)
 		finally:
 			if self.state is not None:
-				self.write_state()
+				self.set_state()
 
 		
