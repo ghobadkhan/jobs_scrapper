@@ -11,7 +11,7 @@ from linkedIn_selenium.utils import ScrapperException
 # Dynamic Inputs
 # KEYWORDS = ["python data engineer","backend python software engineer","cloud engineer"]
 KEYWORDS = ["python data engineer","backend python software engineer","cloud engineer"]
-MAX_NUMBER_OF_JOBS = 500
+MAX_NUMBER_OF_JOBS = 100
 HEADLESS = True
 
 
@@ -43,25 +43,20 @@ scrapper = Scrapper(
 # Run
 scrapper.sign_in()
 for keyword in KEYWORDS:
-    for _ in range(20):
+    for _ in range(100):
         try:
             scrapper.manage_and_run(keyword)
             break
         except ScrapperException as e:
-            scrapper.driver.quit()
             match e.kind:
                 case "max_attempts":
                     logger.critical(f"Maximum attempt times for persisting scrapper is reached. Exiting!")
                     sys.exit(1)
                 case "webdriver":
                     logger.error(f"Webdriver error occurred. Trying to persist.")
-                    scrapper = Scrapper(
-                        job_data=job_data,
-                        max_n_jobs=MAX_NUMBER_OF_JOBS,
-                        logger=logger,
-                        headless=HEADLESS
-                    )
-                    scrapper.sign_in()
+                    scrapper.re_init_driver()
+                    # If we've already signed-in, we don't need to repeat it
+                    # scrapper.sign_in()
                 case _:
                     logger.critical(f"Unknown error occurred from scrapper. Exiting!")
                     sys.exit(1)
