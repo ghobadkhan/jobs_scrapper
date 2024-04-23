@@ -89,11 +89,12 @@ The sample config file:
 ### CPU utilization of Chrome
 
 The Google Chrome specially in Headless mode is notorious for getting out-of-control in
-cpu and mem usage. Since I'm using ec2-micro, this can get critical easily. The hard
+cpu and mem usage. Since I'm using ec2-micro, this can become critical easily. The hard
 approach is the cap the cpu and mem is to use `cgroup`. [(e.g. see this)](https://askubuntu.com/questions/1377502/limit-cpu-and-memory-using-cgroup-in-ubuntu-20-04-lts-server-edition).
 
 The easy way is to use the package `cpulimit`. However cpulimit only limit one process at a time (since chrome spans multiple processes, this isn't too effective). But there's an excellent [bash file](https://aweirdimagination.net/2020/08/09/limit-processor-usage-of-multiple-processes/) that wraps this package and makes it possible to use cpulimit to limit multiple processes. 
 Example:
 ```bash
-./cpulimit-all.sh -l 70 -e chrome --max-depth=1 --watch-interval=3
+./cpulimit-all.sh -l 30 -e chrome --max-depth=1 --watch-interval=3
 ```
+Note that chrome spawns many processes, the 30% cap, limits each individual process. You can't dial it much higher because many individual processes sum up and take all the cpu capacity.

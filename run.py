@@ -13,6 +13,8 @@ from linkedIn_selenium.utils import ScrapperException
 KEYWORDS = ["python data engineer","backend python software engineer","cloud engineer"]
 MAX_NUMBER_OF_JOBS = 100
 HEADLESS = True
+LOAD_TIMEOUT = 50
+USER_DATA_DIR = os.environ['CHROME_PROFILE']
 
 
 # Initialize logger config
@@ -37,7 +39,9 @@ scrapper = Scrapper(
     job_data=job_data,
     max_n_jobs=MAX_NUMBER_OF_JOBS,
     logger=logger,
-    headless=HEADLESS
+    headless=HEADLESS,
+    load_timeout=LOAD_TIMEOUT,
+    user_data_dir=USER_DATA_DIR
 )
 
 # Run
