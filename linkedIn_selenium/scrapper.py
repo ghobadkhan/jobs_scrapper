@@ -1,10 +1,9 @@
 import glob
 import json
 import re
-import sys
 import pandas as pd
 import os
-from typing import List, Literal
+from typing import Literal
 from pathlib import Path
 from logging import Logger, getLogger
 from selenium import webdriver
@@ -34,14 +33,16 @@ class Scrapper():
 			load_timeout=12,
 			debug_address:str|None=None,
 			max_n_jobs:int = 500,
-			driver_logging:bool = True
+			driver_logging:bool = True,
+			user_data_dir:str|None = None
 			) -> None:
 		self.driver_logging = driver_logging
 		self.driver_options = {
 			"disable_extension": disable_extension,
 			"headless": headless,
 			"load_timeout": load_timeout,
-			"debug_address": debug_address
+			"debug_address": debug_address,
+			"user_data_dir": user_data_dir
 		}
 		self.driver = self.setup_webdriver(**self.driver_options)
 		Path(os.environ["BACKUP_FOLDER"]).mkdir(exist_ok=True)
@@ -76,11 +77,19 @@ class Scrapper():
 		self.driver.quit()
 		self.driver = self.setup_webdriver(**self.driver_options)
 
-	def setup_webdriver(self,disable_extension=True,headless=True, load_timeout=12, debug_address:str|None=None):
+	def setup_webdriver(
+			self,
+			disable_extension=True,
+			headless=True,
+			load_timeout=12,
+			debug_address:str|None=None,
+			user_data_dir:str|None=None
+		):
 		#TODO: Load options from a file or other external source
 		options = Options()
 		if debug_address is None:
-			options.add_argument(f"user-data-dir={os.environ['CHROME_PROFILE']}")
+			if user_data_dir is not None:
+				options.add_argument(f"user-data-dir={user_data_dir}")
 			options.add_argument("disable-infobars")
 			# Don't enable the extension for crawling from linkedin. We'll use the extension later
 			# for auto-fill (hopefully)
@@ -121,25 +130,29 @@ class Scrapper():
 				e.msg.find("ERR_PROXY_CONNECTION_FAILED") != -1):
 					raise Exception("RETRY","Connecting Internet")
 				else:
-					raise e
+					raise Exception("Webdriver Exception:",e.msg)
 		return func
 
 	def sign_in(self):
 		self.logger.info("Begin Sign-in")
-		self.driver_get_link('https://www.linkedin.com/login')
+		self.driver_get_link('https://www.linkedin.com')
 		title = self.driver.find_element(By.XPATH,"//title").parent.title
 		pattern = re.compile(r"log\s?-?in|sign\s?-?in|sign\s?-?up",re.IGNORECASE)
 
 		if pattern.search(title):
+			# TODO: Write a subroutine to detect if the challenge page after sign-in is shown
 			# Enter your email address and password
 			try:
 				self.driver.find_element(by=By.ID,value='username').send_keys(os.environ["LINKEDIN_USER"])
 				self.driver.find_element(by=By.ID,value='password').send_keys(os.environ["LINKEDIN_PASSWORD"])# Submit the login form
 				self.driver.find_element(by=By.CSS_SELECTOR,value='.login__form_action_container button').click()
 				sleep(5)
-				self.take_screenshot()
+			except WebDriverException as e:
+				self.logger.error("Error signing in. Webdriver exception")
+				raise Exception(e.msg)
 			except Exception as e:
-				self.logger.error(f"Error signing in. ---> {e}")
+				self.logger.error("Error signing in. Unknown exception")
+				raise e
 		else:
 			self.logger.info("Already signed in!")
 
@@ -282,19 +295,18 @@ class Scrapper():
 		else:
 			df.to_csv(backup_path,mode="w",index=False)
 
-	def scrap_a_job_link(self,link:str,backup_path:str|None = None):
+	def scrap_a_job_link(self,link:str):
 		job_id = job_id_pattern.findall(link)[0]
 		self.set_state({"data":job_id})
 		if self.job_data and not self.job_data.exists(job_id):
 			try:
 				scraped_data = self.scrape_job_page(link,job_id)
+				return scraped_data
+			except WebDriverException as e:
+				self.logger.error(f"Webdriver error while scraping the link: {e.msg}")
 			except Exception as e:
-				self.logger.error(f"Error! {e}")
-				self.take_screenshot("png")
-				return None
-			if backup_path is not None:
-				self.backup_data(scraped_data,backup_path)
-			return scraped_data
+				self.logger.error(f"Unknown error while scraping the link. {e}")
+		self.take_screenshot("png")
 		return None
 
 	@staticmethod
@@ -314,7 +326,8 @@ class Scrapper():
 		
 		# TODO: Unify link backup data with the other data as sqlite
 		with open(file_path,"r") as f:
-			self.logger.debug(f"State file exists at {file_path}")
+			self.logger.debug(f"State file exists at {file_path}\nState={f.read()}")
+			f.seek(0)
 			return json.load(f)
 		
 
@@ -331,7 +344,8 @@ class Scrapper():
 		file_path = f"{os.environ['BACKUP_FOLDER']}/{os.environ['SCRAP_STATE_FILE']}"
 		with open(file_path,"w") as f:
 			json.dump(self.state,f)
-			self.logger.debug(f"State file is written at {file_path}")
+			# Since it's too frequent we won't catch it even at debug level. We set it to sub DEBUG (<10)
+			self.logger.log(msg=f"State file is written at {file_path}",level=8)
 	
 	def del_state_and_backup(self):
 		self.logger.debug(f"Deleting the state and backup files")
@@ -398,7 +412,7 @@ class Scrapper():
 		try:
 			self.run_sequence(query=query,match_threshold=match_threshold)
 		except WebDriverException as e:
-			self.logger.error(f"A webdriver exception occurred:\n{e}")
+			self.logger.error(f"A webdriver exception occurred:\n{e.msg}")
 			if self.state is not None and self.state["attempt"] > int(os.environ["MAX_SCRAPPER_PERSISTENCE"]):
 				raise ScrapperException(kind="max_attempts")
 			else:
