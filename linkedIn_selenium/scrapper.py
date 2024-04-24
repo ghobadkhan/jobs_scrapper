@@ -306,7 +306,8 @@ class Scrapper():
 				self.logger.error(f"Webdriver error while scraping the link: {e.msg}")
 			except Exception as e:
 				self.logger.error(f"Unknown error while scraping the link. {e}")
-		self.take_screenshot("png")
+			self.take_screenshot("png")
+		self.logger.log(msg=f"Job ID {job_id} already exists!",level=8)
 		return None
 
 	@staticmethod
