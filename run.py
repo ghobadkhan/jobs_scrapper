@@ -89,19 +89,21 @@ def run_cpulimit(file_path:str="~/cpulimit-all.sh"):
 
 if __name__ == "__main__":
     runner = Runner()
-    p = Process(target=runner.run_scrapper)
-    high_cpu_count = 85
+    high_cpu_count = 6
     cpu_limit_process = run_cpulimit()
     for r in range(6):
         print(f"Attempt {r} in starting the process")
+        p = Process(target=runner.run_scrapper)
         p.start()
         sleep(5)
-        high_cpu_threshold = 10
+        high_cpu_pct_threshold = 85
         while p.is_alive():
             sleep(2)
-            if psutil.cpu_percent() > high_cpu_threshold:
+            if psutil.cpu_percent() > high_cpu_pct_threshold:
                 high_cpu_count += 1
+                print(f"Detected high cpu usage. Count={high_cpu_count}")
             if high_cpu_count > 5:
+                print("High cpu threshold exceeded. Killing the process")
                 p.kill()
     if cpu_limit_process is not None:
         cpu_limit_process.terminate()
