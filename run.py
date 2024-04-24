@@ -21,6 +21,9 @@ MAX_NUMBER_OF_JOBS = 100
 HEADLESS = True
 LOAD_TIMEOUT = 50
 USER_DATA_DIR = os.environ['CHROME_PROFILE']
+HIGH_CPU_THRESHOLD = 85
+MAX_HIGH_CPU_COUNT = 6
+MAX_SCRAPPER_RESTART_ATTEMPTS = 6
 
 
 class Runner(metaclass=Singleton):
@@ -80,29 +83,30 @@ class Runner(metaclass=Singleton):
                             sys.exit(1)
         self._logger.info("---------------- Crawl process finished successfully! ----------------")
 
-def run_cpulimit(file_path:str="~/cpulimit-all.sh"):
+def run_cpulimit(file_path:str="home/ubuntu/cpulimit-all.sh",proc_name="chrome",cpu_pct=20):
     if not os.path.exists(file_path):
         print(f"cpu_limit file path does not exist. path:{file_path}")
         return None
-    command = f"{file_path} -l 20 -e chrome --max-depth=3 --watch-interval=1"
-    return subprocess.Popen(command)
+    command = ["bash",file_path,"-l",str(cpu_pct),"-e",proc_name,"--max-depth=3","--watch-interval=1"]
+    return subprocess.Popen(command,shell=False,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
 
 if __name__ == "__main__":
     runner = Runner()
-    high_cpu_count = 6
     cpu_limit_process = run_cpulimit()
-    for r in range(6):
-        print(f"Attempt {r} in starting the process")
+    if cpu_limit_process is not None and cpu_limit_process.returncode != 0:
+        print("Error in running cpulimit!")
+    for r in range(MAX_SCRAPPER_RESTART_ATTEMPTS):
+        print(f"Attempt number {r+1} in starting the process")
         p = Process(target=runner.run_scrapper)
         p.start()
         sleep(5)
-        high_cpu_pct_threshold = 85
+        count = 0
         while p.is_alive():
             sleep(2)
-            if psutil.cpu_percent() > high_cpu_pct_threshold:
-                high_cpu_count += 1
-                print(f"Detected high cpu usage. Count={high_cpu_count}")
-            if high_cpu_count > 5:
+            if psutil.cpu_percent() > HIGH_CPU_THRESHOLD:
+                count += 1
+                print(f"Detected high cpu usage. Count={count}")
+            if count > MAX_HIGH_CPU_COUNT:
                 print("High cpu threshold exceeded. Killing the process")
                 p.kill()
     if cpu_limit_process is not None:
