@@ -95,6 +95,6 @@ approach is the cap the cpu and mem is to use `cgroup`. [(e.g. see this)](https:
 The easy way is to use the package `cpulimit`. However cpulimit only limit one process at a time (since chrome spans multiple processes, this isn't too effective). But there's an excellent [bash file](https://aweirdimagination.net/2020/08/09/limit-processor-usage-of-multiple-processes/) that wraps this package and makes it possible to use cpulimit to limit multiple processes. 
 Example:
 ```bash
-./cpulimit-all.sh -l 30 -e chrome --max-depth=1 --watch-interval=3
+./cpulimit-all.sh -l 20 -e chrome --max-depth=3 --watch-interval=1
 ```
 Note that chrome spawns many processes, the 30% cap, limits each individual process. You can't dial it much higher because many individual processes sum up and take all the cpu capacity.
