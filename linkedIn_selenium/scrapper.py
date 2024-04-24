@@ -143,9 +143,9 @@ class Scrapper():
 			# TODO: Write a subroutine to detect if the challenge page after sign-in is shown
 			# Enter your email address and password
 			try:
-				self.driver.find_element(by=By.ID,value='username').send_keys(os.environ["LINKEDIN_USER"])
-				self.driver.find_element(by=By.ID,value='password').send_keys(os.environ["LINKEDIN_PASSWORD"])# Submit the login form
-				self.driver.find_element(by=By.CSS_SELECTOR,value='.login__form_action_container button').click()
+				self.driver.find_element(by=By.ID,value='session_key').send_keys(os.environ["LINKEDIN_USER"])
+				self.driver.find_element(by=By.ID,value='session_password').send_keys(os.environ["LINKEDIN_PASSWORD"])# Submit the login form
+				self.driver.find_element(By.XPATH,"//button[contains(@data-id,'sign-in-form__submit-btn')]").click()
 				sleep(5)
 			except WebDriverException as e:
 				self.logger.error("Error signing in. Webdriver exception")

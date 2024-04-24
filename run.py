@@ -101,7 +101,8 @@ def run_cpulimit(file_path:str="/home/ubuntu/cpulimit-all.sh",proc_name="chrome"
 
 if __name__ == "__main__":
     runner = Runner()
-    cpu_limit_process = run_cpulimit("/home/arian/Desktop/cpulimit-all.sh")
+    cpu_limit_process = None
+    # cpu_limit_process = run_cpulimit("/home/ubuntu/cpulimit-all.sh")
     if cpu_limit_process is None:
         print("Error in running cpulimit!")
     for r in range(MAX_SCRAPPER_RESTART_ATTEMPTS):
@@ -119,6 +120,9 @@ if __name__ == "__main__":
                 count = 0
             if count > MAX_HIGH_CPU_COUNT:
                 print("High cpu threshold exceeded. Killing the process")
+                for proc in psutil.process_iter():
+                    if proc.name().find("chrome"):
+                        proc.kill()
                 p.kill()
     if cpu_limit_process is not None:
         cpu_limit_process.kill()
