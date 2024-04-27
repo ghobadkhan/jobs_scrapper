@@ -8,10 +8,10 @@ from multiprocessing import Process
 from logging import Logger, config, getLogger
 from pathlib import Path
 from time import sleep
-from linkedIn_selenium.scrapper import Scrapper
-from linkedIn_selenium.db import DB
-from linkedIn_selenium.utils import ScrapperException
-from linkedIn_selenium.contracts import JobData, Singleton
+from src.scrapper import Scrapper
+from src.db import DB
+from src.utils import ScrapperException
+from src.contracts import JobData, Singleton
 
 
 # Dynamic Inputs
@@ -40,7 +40,7 @@ class Runner(metaclass=Singleton):
             os.environ["OUTPUT_FOLDER"]
             ]:
             Path(folder).mkdir(exist_ok=True)
-        logging_config_file_name = "linkedIn_selenium/logging_local.yml"
+        logging_config_file_name = "src/logging_local.yml"
         with open(logging_config_file_name, 'r') as logging_config_file:
             config.dictConfig(yaml.load(logging_config_file, Loader=yaml.FullLoader))
         # Get the specific logger for scrapper #TODO: We later get specific logs for each component
