@@ -7,6 +7,10 @@ formatters:
     style: '{'
     format: '[{asctime}] {levelname:>2}: {message:>3}'
     datefmt: '%Y-%m-%d %H:%M:%S'
+  detailed:
+    style: '{'
+    format: '[{asctime}] {name} [{levelname:>2}]: {message:>3} (line {lineno})'
+    datefmt: '%Y-%m-%d %H:%M:%S'
 
 handlers:
   console:
@@ -14,12 +18,20 @@ handlers:
     formatter: simple
     stream: ext://sys.stdout
     level: INFO
-  file:
+  file_scrapper:
     class: logging.handlers.RotatingFileHandler
     formatter: simple
     filename: 'log/run.log'
     maxBytes: 1048576
     backupCount: 3
+    level: DEBUG
+  file_procmon:
+    class: logging.handlers.TimedRotatingFileHandler
+    formatter: simple
+    filename: 'log/procmon.log'
+    when: 'D'
+    interval: 10 
+    backupCount: 0
     level: DEBUG
 
 loggers:
@@ -27,18 +39,17 @@ loggers:
     level: DEBUG
     handlers: 
       - console
-      - file
   scraper:
     qualname: scrape
     level: DEBUG
     handlers: 
       - console
-      - file
+      - file_scrapper
     propagate: False
-  autofill:
-    qualname: autofill
+  procmon:
+    qualname: procmon
     level: DEBUG
     handlers: 
       - console
-      - file
+      - file_procmon
     propagate: False
